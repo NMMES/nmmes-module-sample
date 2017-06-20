@@ -59,6 +59,7 @@ new sample({
     /*
     seek: 'middle'
     Sample that is taken directly from the middle of the video (videoDuration / 2 - (length / 2))
+    
     seek: '20%'
     Sample starts 20% of the way through the video
 
