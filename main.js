@@ -2,6 +2,7 @@
 
 const nmmes = require('nmmes-backend');
 const Logger = nmmes.Logger;
+const Video = nmmes.Video;
 const chalk = require('chalk');
 const onDeath = require('death');
 const Path = require('path');
@@ -11,31 +12,18 @@ const Promise = require('bluebird').config({
     cancellation: true
 });
 
-/*
- * Arguments
- * seek - (number | string) The position to start the sample at. Options include
- *  the number of milliseconds to seek to, a string percent (Ex. '50%') to seek to,
- *  or 'middle' to seek to 50% - (length / 2)
- * length - (number) The length of the output sample in milliseconds
- * output - (string)
- * suffix - (string)
- */
-
 module.exports = class Sample extends nmmes.Module {
     constructor(args) {
         super(require('./package.json'));
 
-        this.args = Object.assign({
-            seek: 'middle',
-            length: 30000,
-            format: 'matroska'
-        }, args);
+        this.options = Object.assign(nmmes.Module.defaults(Sample), args);
 
-        this.args.length = this.args.length / 1000; // Convert milliseconds to seconds
+        this.options.length = this.options.length / 1000; // Convert milliseconds to seconds
     }
-    executable(video, map) {
+    executable(map) {
         let _self = this;
-        let args = this.args;
+        let options = this.options;
+        let video = this.video;
 
         this.removeDeathListener = onDeath(function(signal, err) {
             Logger.trace('Signal receieved:', signal, err);
@@ -43,64 +31,96 @@ module.exports = class Sample extends nmmes.Module {
         });
 
         let encoder = this.encoder = ffmpeg(video.output.path).outputOptions('-c', 'copy').outputOptions('-map', '0');
+        return Promise.props({
+            seek: Sample.calculateSeek(options.seek, options.length, video),
+            output: Sample.generateOutputPath(options.output, video.output.path, options.suffix)
+        }).then(props => {
+            encoder.seekInput(Math.min(video.output.metadata.format.duration - props.seek, Math.max(0, props.seek)));
 
-        let seek = 0;
-        if (typeof args.seek === 'string') {
-            if (args.seek.endsWith('%')) {
-                seek = video.output.metadata.format.duration * parseInt(args.seek, 10) / 100;
-            } else {
-                if (args.seek === 'middle') {
-                    seek = (video.output.metadata.format.duration / 2) - (args.length / 2);
-                }
-            }
-        } else if (typeof args.seek === 'number') {
-            seek = args.seek / 1000;
-        }
+            encoder.duration(options.length);
 
-        encoder.seekInput(Math.min(video.output.metadata.format.duration - seek, Math.max(0, seek)));
+            // TODO: Enable format option
+            encoder.format('matroska');
 
-        encoder.duration(args.length);
+            encoder.output(props.output);
 
-        encoder.format(args.format);
+            return new Promise(function(resolve, reject, onCancel) {
 
-        let output = args.output;
+                fs.ensureDir(Path.dirname(props.output), err => {
+                    if (err)
+                        return reject(err);
 
+                    _self.encoder
+                        .on('start', function(commandLine) {
+                            Logger.trace('[FFMPEG] Query:', commandLine);
+                        })
+                        .on('error', function(error, stdout, stderr) {
+                            Logger.debug('[FFMPEG] STDOUT:\n', stdout, '[FFMPEG] STDERR:\n', stderr);
+                            _self.removeDeathListener();
+                            reject(error);
+                        })
+                        .on('end', function(stdout, stderr) {
+                            _self.removeDeathListener();
+                            resolve();
+                        }).run();
+
+                    onCancel(_self.encoder.kill.bind(_self.encoder));
+                });
+            });
+        }).return({});
+    };
+    static options() {
+        return {
+            'length': {
+                default: 30000,
+                describe: 'Milliseconds to encode in preview mode. Max is half the length of input video.',
+                type: 'number',
+                group: 'General:'
+            },
+            'seek': {
+                default: 'middle',
+                describe: 'Milliseconds/precent to start preview at. Middle will take a preview of the middle of the video.',
+                type: 'string',
+                group: 'Advanced:'
+            },
+            'suffix': {
+                default: '-sample',
+                describe: 'Sample output file suffix.',
+                type: 'string',
+                group: 'Advanced:'
+            },
+        };
+    }
+
+    static generateOutputPath(output, videoPath, suffix = "-sample") {
+        let parsed = Path.parse(videoPath);
         if (!output) {
             output = Path.format({
-                name: video.output.name + '-sample',
-                ext: video.output.ext,
-                dir: video.output.dir
+                name: parsed.name + suffix,
+                ext: parsed.ext,
+                dir: parsed.dir
             });
         }
 
+        // TODO: windows support (D:\ or C:\)
         if (!output.startsWith(Path.sep)) {
-            output = Path.resolve(video.output.dir, output);
+            output = Path.resolve(parsed.dir, output);
         }
+        return output;
+    }
 
-        encoder.output(output);
-
-        return new Promise(function(resolve, reject, onCancel) {
-
-            fs.ensureDir(Path.dirname(output), err => {
-                if (err)
-                    return reject(err);
-
-                _self.encoder
-                    .on('start', function(commandLine) {
-                        Logger.trace('[FFMPEG] Query:', commandLine);
-                    })
-                    .on('error', function(error, stdout, stderr) {
-                        Logger.debug('[FFMPEG] STDOUT:\n', stdout, '[FFMPEG] STDERR:\n', stderr);
-                        _self.removeDeathListener();
-                        reject(error);
-                    })
-                    .on('end', function(stdout, stderr) {
-                        _self.removeDeathListener();
-                        resolve();
-                    }).run();
-
-                onCancel(_self.encoder.kill.bind(_self.encoder));
-            });
+    static calculateSeek(requested, length, video) {
+        return new Promise(function(resolve, reject) {
+            let duration = video.output.metadata.format.duration;
+            if (isNaN(requested)) {
+                if (requested.endsWith('%')) {
+                    return resolve(duration * parseInt(requested, 10) / 100);
+                } else if (requested === 'middle') {
+                    return resolve((duration / 2) - (length / 2));
+                }
+            } else {
+                return resolve(parseInt(requested) / 1000);
+            }
         });
-    };
+    }
 }
