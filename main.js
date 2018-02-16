@@ -79,7 +79,7 @@ module.exports = class Sample extends nmmes.Module {
             },
             'seek': {
                 default: 'middle',
-                describe: 'Milliseconds/precent to start preview at. Middle will take a preview of the middle of the video.',
+                describe: 'Milliseconds/percent to start preview at. Middle will take a preview of the middle of the video.',
                 type: 'string',
                 group: 'Advanced:'
             },
