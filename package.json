@@ -1,6 +1,6 @@
 {
   "name": "nmmes-module-sample",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "NMMES sample module",
   "main": "main.js",
   "scripts": {
