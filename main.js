@@ -26,11 +26,12 @@ module.exports = class Sample extends nmmes.Module {
 
         this.removeDeathListener = onDeath(function(signal, err) {
             if (_self.encoder) {
-                _self.trace('Signal receieved:', signal, err);
+                _self.logger.trace('Signal receieved:', signal, err);
                 _self.encoder.kill(signal);
             }
         });
         if (options.screenshots) {
+            this.logger.log('Generating screenshots...');
             let encoder = this.encoder = ffmpeg(video.output.path).outputOptions('-map', '0');
             await (new Promise((resolve, reject) => {
                 encoder
@@ -74,7 +75,7 @@ module.exports = class Sample extends nmmes.Module {
 
                         _self.encoder
                             .on('start', function(commandLine) {
-                                _self.trace('[FFMPEG] Query:', commandLine);
+                                _self.logger.trace('[FFMPEG] Query:', commandLine);
                             })
                             .on('error', function(error, stdout, stderr) {
                                 _self.removeDeathListener();
