@@ -1,8 +1,6 @@
 'use strict';
 
 const nmmes = require('nmmes-backend');
-const Logger = nmmes.Logger;
-const Video = nmmes.Video;
 const chalk = require('chalk');
 const onDeath = require('death');
 const Path = require('path');
@@ -11,9 +9,8 @@ const fs = require('fs-extra');
 const Promise = require('bluebird');
 
 module.exports = class Sample extends nmmes.Module {
-    constructor(args, logger = Logger) {
-        super(require('./package.json'));
-        this.logger = logger;
+    constructor(args, logger) {
+        super(require('./package.json'), logger);
 
         this.options = Object.assign(nmmes.Module.defaults(Sample), args);
 
@@ -31,10 +28,13 @@ module.exports = class Sample extends nmmes.Module {
             }
         });
         if (options.screenshots) {
-            this.logger.log('Generating screenshots...');
-            let encoder = this.encoder = ffmpeg(video.output.path).outputOptions('-map', '0');
+            this.logger.debug('Generating screenshots...');
+            let encoder = this.encoder = ffmpeg(video.output.path);
             await (new Promise((resolve, reject) => {
                 encoder
+                    .on('filenames', function(filenames) {
+                        _self.logger.trace("Generating screenshots:", filenames);
+                    })
                     .on('error', function(error, stdout, stderr) {
                         _self.removeDeathListener();
                         reject(error);
@@ -44,14 +44,14 @@ module.exports = class Sample extends nmmes.Module {
                         resolve();
                     })
                     .screenshots({
-                        timestamps: ['50%', '70%'],
-                        filename: 'thumbnail-at-%s-seconds.png',
-                        folder: Path.resolve(this.output.dir, 'screenshots')
+                        count: options.screenshots,
+                        filename: `%b-%0i[%r].${options['screenshot-format']}`,
+                        folder: Path.resolve(video.output.dir, 'screenshots')
                     });
             }));
         }
 
-        if (options.sample) {
+        if (options.video) {
             let encoder = this.encoder = ffmpeg(video.output.path).outputOptions('-c', 'copy').outputOptions('-map', '0');
             await Promise.props({
                 seek: Sample.calculateSeek(options.seek, options.length, video),
@@ -89,6 +89,7 @@ module.exports = class Sample extends nmmes.Module {
                 });
             });
         }
+        return {};
     };
     static options() {
         return {
@@ -104,7 +105,7 @@ module.exports = class Sample extends nmmes.Module {
                 type: 'string',
                 group: 'Advanced:'
             },
-            'enable': {
+            'video': {
                 default: true,
                 describe: 'Create a sample of the finished encode.',
                 type: 'boolean',
