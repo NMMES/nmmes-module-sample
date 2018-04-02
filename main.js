@@ -1,12 +1,10 @@
 'use strict';
 
 const nmmes = require('nmmes-backend');
-const chalk = require('chalk');
 const onDeath = require('death');
 const Path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs-extra');
-const Promise = require('bluebird');
 
 module.exports = class Sample extends nmmes.Module {
     constructor(args, logger) {
@@ -53,39 +51,34 @@ module.exports = class Sample extends nmmes.Module {
 
         if (options.video) {
             let encoder = this.encoder = ffmpeg(video.output.path).outputOptions('-c', 'copy').outputOptions('-map', '0');
-            await Promise.props({
-                seek: Sample.calculateSeek(options.seek, options.length, video),
-                output: Sample.generateOutputPath(options.output, video.output.path, options.suffix)
-            }).then(props => {
 
-                encoder.seekInput(Math.min(video.output.metadata.format.duration - props.seek, Math.max(0, props.seek)));
+            const seek = Sample.calculateSeek(options.seek, options.length, video),
+                output = Sample.generateOutputPath(options.output, video.output.path, options.suffix);
 
-                encoder.duration(options.length);
+            encoder.seekInput(Math.min(video.output.metadata.format.duration - seek, Math.max(0, seek)));
 
-                // TODO: Enable format option
-                encoder.format('matroska');
+            encoder.duration(options.length);
 
-                encoder.output(props.output);
+            encoder.output(output);
 
-                return new Promise(function(resolve, reject) {
+            return new Promise(function(resolve, reject) {
 
-                    fs.ensureDir(Path.dirname(props.output), err => {
-                        if (err)
-                            return reject(err);
+                fs.ensureDir(Path.dirname(props.output), err => {
+                    if (err)
+                        return reject(err);
 
-                        _self.encoder
-                            .on('start', function(commandLine) {
-                                _self.logger.trace('[FFMPEG] Query:', commandLine);
-                            })
-                            .on('error', function(error, stdout, stderr) {
-                                _self.removeDeathListener();
-                                reject(error);
-                            })
-                            .on('end', function(stdout, stderr) {
-                                _self.removeDeathListener();
-                                resolve();
-                            }).run();
-                    });
+                    _self.encoder
+                        .on('start', function(commandLine) {
+                            _self.logger.trace('[FFMPEG] Query:', commandLine);
+                        })
+                        .on('error', function(error, stdout, stderr) {
+                            _self.removeDeathListener();
+                            reject(error);
+                        })
+                        .on('end', function(stdout, stderr) {
+                            _self.removeDeathListener();
+                            resolve();
+                        }).run();
                 });
             });
         }
@@ -133,6 +126,7 @@ module.exports = class Sample extends nmmes.Module {
         };
     }
 
+    // TODO: Make these 2 functions non static
     static generateOutputPath(output, videoPath, suffix = "-sample") {
         let parsed = Path.parse(videoPath);
         if (!output) {
@@ -151,17 +145,15 @@ module.exports = class Sample extends nmmes.Module {
     }
 
     static calculateSeek(requested, length, video) {
-        return new Promise(function(resolve, reject) {
-            let duration = video.output.metadata.format.duration;
-            if (isNaN(requested)) {
-                if (requested.endsWith('%')) {
-                    return resolve(duration * parseInt(requested, 10) / 100);
-                } else if (requested === 'middle') {
-                    return resolve((duration / 2) - (length / 2));
-                }
-            } else {
-                return resolve(parseInt(requested) / 1000);
+        let duration = video.output.metadata.format.duration;
+        if (isNaN(requested)) {
+            if (requested.endsWith('%')) {
+                return duration * parseInt(requested, 10) / 100;
+            } else if (requested === 'middle') {
+                return (duration / 2) - (length / 2);
             }
-        });
+        } else {
+            return parseInt(requested) / 1000;
+        }
     }
 }
